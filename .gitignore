@@ -1,0 +1,36 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Terraform variable files
+*.tfvars
+*.tfvars.json
+
+# Sensitive files
+*.pem
+*.key
+*.secret
+
+# Terraform plans
+*.tfplan
+*.plan
+
+# Terraform lock file should be committed
+# Do NOT ignore .terraform.lock.hcl
+
+# Local environment files
+.env
+.env.*
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Temporary / backup files
+*.backup
+*.bak
+*~
