@@ -1,3 +1,4 @@
+```yaml
 name: Terraform Apply
 
 on:
@@ -28,6 +29,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: OIDC Debug
+        uses: github/actions-oidc-debugger@main
+        with:
+          audience: sts.amazonaws.com
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
@@ -36,6 +42,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-south-1
+
+      - name: Check AWS Identity
+        run: aws sts get-caller-identity
 
       - name: Terraform Init
         run: terraform init -input=false
@@ -47,3 +56,4 @@ jobs:
         env:
           TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
         run: terraform apply -input=false -auto-approve
+```
