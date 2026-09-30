@@ -2,60 +2,43 @@ name: Terraform Plan
 
 on:
   pull_request:
-    branches:
-      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
     paths:
-      - 'environments/**'
+      - "terraform/**"
+      - ".github/workflows/terraform-plan.yml"
 
 permissions:
+  id-token: write
   contents: read
   pull-requests: write
-  id-token: write
 
-concurrency:
-  group: terraform-plan-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+env:
+  AWS_REGION: ap-south-1
 
 jobs:
-  terraform-plan:
-    name: Terraform Plan
+  plan-eks:
+    name: Terraform Plan - EKS
     runs-on: ubuntu-latest
 
     defaults:
       run:
-        working-directory: environments/dev
+        working-directory: terraform/environments/dev/eks
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-
-      - name: Debug GitHub OIDC Claims
-        run: |
-          TOKEN=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            | jq -r '.value')
-
-          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
-
-          case $((${#PAYLOAD} % 4)) in
-            2) PAYLOAD="${PAYLOAD}==" ;;
-            3) PAYLOAD="${PAYLOAD}=" ;;
-          esac
-
-          echo "$PAYLOAD" | base64 -d 2>/dev/null | jq '{sub, aud, repository, ref}'
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
-
-      - name: Check AWS Identity
-        run: aws sts get-caller-identity
 
       - name: Terraform Init
         run: terraform init -input=false
@@ -67,65 +50,198 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        id: plan
-        continue-on-error: true
-        env:
-          TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
-        run: terraform plan -no-color -input=false
+        run: terraform plan -input=false -no-color -out=tfplan
 
-      - name: Comment Terraform Plan
-        if: always()
+      - name: Show Terraform Plan
+        run: terraform show -no-color tfplan > plan.txt
+
+      - name: Upload EKS Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-eks
+          path: terraform/environments/dev/eks/plan.txt
+
+
+  plan-platform:
+    name: Terraform Plan - Platform
+    runs-on: ubuntu-latest
+    needs: plan-eks
+
+    defaults:
+      run:
+        working-directory: terraform/environments/dev/platform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Show Terraform Plan
+        run: terraform show -no-color tfplan > plan.txt
+
+      - name: Upload Platform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-platform
+          path: terraform/environments/dev/platform/plan.txt
+
+
+  plan-application:
+    name: Terraform Plan - ApplicationSet
+    runs-on: ubuntu-latest
+    needs: plan-platform
+
+    defaults:
+      run:
+        working-directory: terraform/environments/dev/application
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Show Terraform Plan
+        run: terraform show -no-color tfplan > plan.txt
+
+      - name: Upload Application Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-application
+          path: terraform/environments/dev/application/plan.txt
+
+
+  comment-plan:
+    name: Post Plan to PR
+    runs-on: ubuntu-latest
+    needs:
+      - plan-eks
+      - plan-platform
+      - plan-application
+
+    steps:
+      - name: Download EKS Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-eks
+          path: plans/eks
+
+      - name: Download Platform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-platform
+          path: plans/platform
+
+      - name: Download Application Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-application
+          path: plans/application
+
+      - name: Create PR comment
+        run: |
+          {
+            echo "## Terraform Plan"
+            echo
+            echo "### EKS"
+            echo '```terraform'
+            cat plans/eks/plan.txt
+            echo '```'
+            echo
+            echo "### Platform"
+            echo '```terraform'
+            cat plans/platform/plan.txt
+            echo '```'
+            echo
+            echo "### ApplicationSet"
+            echo '```terraform'
+            cat plans/application/plan.txt
+            echo '```'
+          } > terraform-plan-comment.md
+
+      - name: Comment Terraform Plan on PR
         uses: actions/github-script@v7
         env:
-          PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
-          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          PLAN_FILE: terraform-plan-comment.md
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = `## Terraform Plan
+            const fs = require("fs");
 
-            **Environment:** \`dev\`
+            const body = fs.readFileSync(
+              process.env.PLAN_FILE,
+              "utf8"
+            );
 
-            **Exit code:** \`${process.env.PLAN_EXITCODE}\`
+            const marker = "<!-- terraform-plan -->";
 
-            <details>
-            <summary>Show Terraform Plan</summary>
+            const commentBody = `${marker}\n${body}`;
 
-            \`\`\`terraform
-            ${process.env.PLAN_OUTPUT}
-            \`\`\`
+            const { data: comments } =
+              await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
 
-            </details>`;
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const existingComment = comments.data.find(
-              comment =>
-                comment.user.type === 'Bot' &&
-                comment.body.includes('## Terraform Plan')
+            const existingComment = comments.find(
+              comment => comment.user.type === "Bot" &&
+                         comment.body.includes(marker)
             );
 
             if (existingComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
                 comment_id: existingComment.id,
-                body: output
+                body: commentBody
               });
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: output
+                body: commentBody
               });
             }
-
-      - name: Fail if Terraform Plan failed
-        if: steps.plan.outcome == 'failure'
-        run: exit 1

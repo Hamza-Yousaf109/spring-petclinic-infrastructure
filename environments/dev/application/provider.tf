@@ -1,0 +1,47 @@
+terraform {
+  required_version = ">= 1.14.9, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.14"
+    }
+  }
+}
+
+provider "aws" {
+  region              = var.aws_region
+  allowed_account_ids = [var.aws_account_id]
+}
+
+data "aws_eks_cluster" "petclinic" {
+  name = var.cluster_name
+}
+
+provider "kubectl" {
+  host = data.aws_eks_cluster.petclinic.endpoint
+  cluster_ca_certificate = base64decode(
+    data.aws_eks_cluster.petclinic.certificate_authority[0].data
+  )
+
+  load_config_file = false
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name",
+      var.cluster_name,
+      "--region",
+      var.aws_region
+    ]
+  }
+}
