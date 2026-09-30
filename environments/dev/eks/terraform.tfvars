@@ -11,5 +11,6 @@ eks_public_access_cidrs = [
 ]
 
 eks_cluster_admin_principal_arns = [
-  "arn:aws:iam::992382771174:user/hamza"
+  "arn:aws:iam::992382771174:user/hamza",
+  "arn:aws:iam::992382771174:role/GitHubActions-TerraformRole"
 ]
