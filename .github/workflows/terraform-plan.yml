@@ -1,111 +1,136 @@
 name: Terraform Plan
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'environments/**'
+pull_request:
+branches:
+- main
+paths:
+- 'environments/**'
 
 permissions:
-  contents: read
-  pull-requests: write
-  id-token: write
+contents: read
+pull-requests: write
+id-token: write
 
 concurrency:
-  group: terraform-plan-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+group: terraform-plan-${{ github.event.pull_request.number }}
+cancel-in-progress: true
 
 jobs:
-  terraform-plan:
-    name: Terraform Plan
-    runs-on: ubuntu-latest
+terraform-plan:
+name: Terraform Plan
+runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: environments/dev
+```
+defaults:
+  run:
+    working-directory: environments/dev
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout
+    uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+  - name: Setup Terraform
+    uses: hashicorp/setup-terraform@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
+  - name: Debug GitHub OIDC Claims
+    env:
+      ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+    run: |
+      TOKEN=$(curl -sS \
+        -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+        "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+        | jq -r '.value')
 
-      - name: Terraform Init
-        run: terraform init -input=false
+      PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
+      case $((${#PAYLOAD} % 4)) in
+        2) PAYLOAD="${PAYLOAD}==" ;;
+        3) PAYLOAD="${PAYLOAD}=" ;;
+      esac
 
-      - name: Terraform Validate
-        run: terraform validate
+      echo "$PAYLOAD" | base64 -d 2>/dev/null | jq '{sub, aud, repository, ref}'
 
-      - name: Terraform Plan
-        id: plan
-        continue-on-error: true
-        env:
-          TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
-        run: terraform plan -no-color -input=false
+  - name: Configure AWS credentials
+    uses: aws-actions/configure-aws-credentials@v4
+    with:
+      role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      aws-region: ap-south-1
 
-      - name: Comment Terraform Plan
-        if: always()
-        uses: actions/github-script@v7
-        env:
-          PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
-          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `## Terraform Plan
+  - name: Check AWS Identity
+    run: aws sts get-caller-identity
 
-            **Environment:** \`dev\`
+  - name: Terraform Init
+    run: terraform init -input=false
 
-            **Exit code:** \`${process.env.PLAN_EXITCODE}\`
+  - name: Terraform Format Check
+    run: terraform fmt -check -recursive
 
-            <details>
-            <summary>Show Terraform Plan</summary>
+  - name: Terraform Validate
+    run: terraform validate
 
-            \`\`\`terraform
-            ${process.env.PLAN_OUTPUT}
-            \`\`\`
+  - name: Terraform Plan
+    id: plan
+    continue-on-error: true
+    env:
+      TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
+    run: terraform plan -no-color -input=false
 
-            </details>`;
+  - name: Comment Terraform Plan
+    if: always()
+    uses: actions/github-script@v7
+    env:
+      PLAN_OUTPUT: ${{ steps.plan.outputs.stdout }}
+      PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      script: |
+        const output = `## Terraform Plan
 
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
+        **Environment:** \`dev\`
 
-            const existingComment = comments.data.find(
-              comment =>
-                comment.user.type === 'Bot' &&
-                comment.body.includes('## Terraform Plan')
-            );
+        **Exit code:** \`${process.env.PLAN_EXITCODE}\`
 
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body: output
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: output
-              });
-            }
+        <details>
+        <summary>Show Terraform Plan</summary>
 
-      - name: Fail if Terraform Plan failed
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+        \`\`\`terraform
+        ${process.env.PLAN_OUTPUT}
+        \`\`\`
+
+        </details>`;
+
+        const comments = await github.rest.issues.listComments({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          issue_number: context.issue.number
+        });
+
+        const existingComment = comments.data.find(
+          comment =>
+            comment.user.type === 'Bot' &&
+            comment.body.includes('## Terraform Plan')
+        );
+
+        if (existingComment) {
+          await github.rest.issues.updateComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            comment_id: existingComment.id,
+            body: output
+          });
+        } else {
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: output
+          });
+        }
+
+  - name: Fail if Terraform Plan failed
+    if: steps.plan.outcome == 'failure'
+    run: exit 1
+
