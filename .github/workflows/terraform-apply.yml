@@ -55,4 +55,4 @@ jobs:
         env:
           TF_VAR_datadog_api_key: ${{ secrets.TF_VAR_datadog_api_key }}
         run: terraform apply -input=false -auto-approve
-```
+
