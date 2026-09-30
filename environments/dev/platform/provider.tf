@@ -30,7 +30,7 @@ data "aws_eks_cluster" "petclinic" {
 
 provider "helm" {
   kubernetes = {
-    host                   = data.aws_eks_cluster.petclinic.endpoint
+    host = data.aws_eks_cluster.petclinic.endpoint
     cluster_ca_certificate = base64decode(
       data.aws_eks_cluster.petclinic.certificate_authority[0].data
     )
@@ -52,7 +52,7 @@ provider "helm" {
 }
 
 provider "kubernetes" {
-  host                   = data.aws_eks_cluster.petclinic.endpoint
+  host = data.aws_eks_cluster.petclinic.endpoint
   cluster_ca_certificate = base64decode(
     data.aws_eks_cluster.petclinic.certificate_authority[0].data
   )
