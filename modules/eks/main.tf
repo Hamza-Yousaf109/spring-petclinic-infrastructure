@@ -54,7 +54,7 @@ resource "aws_eks_cluster" "petclinic" {
   depends_on = [aws_cloudwatch_log_group.cluster]
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -65,7 +65,7 @@ resource "aws_cloudwatch_log_group" "cluster" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 

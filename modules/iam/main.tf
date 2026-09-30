@@ -33,7 +33,7 @@ resource "aws_iam_role" "eks_cluster" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -61,7 +61,7 @@ resource "aws_iam_role" "eks_auto_mode_nodes" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 

@@ -13,7 +13,7 @@ resource "aws_kms_key" "eks" {
   tags = local.common_tags
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 

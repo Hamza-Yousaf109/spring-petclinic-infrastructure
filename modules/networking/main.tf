@@ -19,7 +19,7 @@ resource "aws_vpc" "petclinic" {
   })
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
 
     precondition {
       condition     = length(var.availability_zones) == length(var.public_subnet_cidrs) && length(var.availability_zones) == length(var.private_subnet_cidrs)
